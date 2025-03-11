@@ -10,7 +10,7 @@ import os
 import requests
 import tempfile
 import shutil
-from ollamarag import OllamaRAG
+from ollamarag_core import OllamaRAG
 
 app = FastAPI(
     title="OllamaRAG API",
