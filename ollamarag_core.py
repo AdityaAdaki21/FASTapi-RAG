@@ -134,64 +134,42 @@ class OllamaRAG:
         return response.json()["embedding"]
     
     def get_or_create_collection(self, collection_name: str) -> chromadb.Collection:
-        # First check if collection already exists
-        try:
-            collections = self.chroma_client.list_collections()
-            collection_names = [coll.name for coll in collections]
-            if collection_name in collection_names:
-                logger.info(f"Using existing collection: {collection_name}")
-                return self.chroma_client.get_collection(name=collection_name)
-        except Exception as e:
-            logger.debug(f"Error checking existing collections: {str(e)}")
+        """
+        Get an existing collection or create a new one with proper embedding function.
         
-        # If collection doesn't exist, create a new one
-        logger.info(f"Creating fresh collection: {collection_name}")
-        
-        try:
-            # Try to get the collection first
-            try:
-                collection = self.chroma_client.get_collection(name=collection_name)
-                logger.info("Using existing collection")
-                return collection
-            except Exception:
-                # Collection doesn't exist, so create it
-                collection = self.chroma_client.create_collection(name=collection_name)
-                logger.info("Created collection with default embeddings")
-                return collection
-        except Exception as e:
-            logger.warning(f"Error creating collection with default embeddings: {e}")
+        Args:
+            collection_name: Name of the collection
             
-            # Try with custom embedding function
-            try:
-                try:
-                    collection = self.chroma_client.get_collection(
-                        name=collection_name,
-                        embedding_function=self.ollama_ef  # Always specify embedding function
-                    )
-                    logger.info("Using existing collection with custom embeddings")
-                    return collection
-                except Exception:
-                    # Collection doesn't exist, so create it
-                    collection = self.chroma_client.create_collection(
-                        name=collection_name,
-                        embedding_function=self.ollama_ef  # Always specify embedding function
-                    )
-                    logger.info("Created collection with custom embeddings")
-                    return collection
-            except Exception as e:
-                logger.error(f"Error accessing collection: {e}")
-                raise e
-            except Exception as e2:
-                logger.warning(f"Error creating collection with custom embeddings: {e2}")
-                
-                # Last resort: try with no arguments
-                try:
-                    collection = self.chroma_client.create_collection(name=collection_name)
-                    logger.info("Created basic collection")
-                    return collection
-                except Exception as e3:
-                    logger.error("All collection creation methods failed!")
-                    raise e3
+        Returns:
+            chromadb.Collection: The retrieved or created collection
+        """
+        # First try to get the existing collection
+        try:
+            collection = self.chroma_client.get_collection(
+                name=collection_name,
+                embedding_function=self.ollama_ef
+            )
+            logger.info(f"Using existing collection: {collection_name}")
+            return collection
+        except Exception as e:
+            logger.debug(f"Collection doesn't exist, will create new one: {str(e)}")
+        
+        # Collection doesn't exist, create a new one with embedding function
+        try:
+            collection = self.chroma_client.create_collection(
+                name=collection_name,
+                embedding_function=self.ollama_ef
+            )
+            logger.info(f"Created collection with custom embeddings: {collection_name}")
+            return collection
+        except Exception as e:
+            logger.warning(f"Failed to create collection with custom embeddings: {e}")
+        
+        # Last resort: create a basic collection
+        logger.warning("Attempting to create basic collection without custom embeddings")
+        collection = self.chroma_client.create_collection(name=collection_name)
+        logger.info(f"Created basic collection: {collection_name}")
+        return collection
 
     def _keep_models_alive(self) -> None:
         while True:

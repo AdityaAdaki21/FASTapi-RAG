@@ -11,6 +11,7 @@ import requests
 import tempfile
 import shutil
 from ollamarag_core import OllamaRAG
+from ollamarag_document import OllamaDocumentProcessor  # Import the correct class
 
 app = FastAPI(
     title="OllamaRAG API",
@@ -50,7 +51,7 @@ class ModelConfig(BaseModel):
 # Initialize the RAG system
 def init_rag(llm_model="tinyllama", embedding_model="mxbai-embed-large", context_window=2048):
     global rag
-    rag = OllamaRAG(llm_model=llm_model, embedding_model=embedding_model)
+    rag = OllamaDocumentProcessor(llm_model=llm_model, embedding_model=embedding_model)
     rag.context_window = context_window
     rag.start_keep_alive_thread()
     return rag
@@ -140,20 +141,24 @@ async def list_collections():
         raise HTTPException(status_code=500, detail="RAG system not initialized")
     
     try:
-        collections = rag.chroma_client.list_collections()
+        # list_collections now returns a list of names (strings)
+        collection_names = rag.chroma_client.list_collections()
         collection_info = []
         
-        for collection in collections:
+        for name in collection_names:
             try:
-                count = collection.count()
+                # Retrieve the full collection object using the name
+                coll = rag.chroma_client.get_collection(name=name, embedding_function=rag.ollama_ef)
+                count = coll.count()
+                active = rag.current_pdf and name == rag.current_pdf.split('.')[0].replace(" ", "_")
                 collection_info.append({
-                    "name": collection.name,
+                    "name": name,
                     "count": count,
-                    "active": rag.current_pdf and collection.name == rag.current_pdf.split('.')[0].replace(" ", "_")
+                    "active": active
                 })
             except Exception:
                 collection_info.append({
-                    "name": collection.name,
+                    "name": name,
                     "count": "Error",
                     "active": False
                 })
@@ -395,6 +400,23 @@ async def reindex_collection(
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error reindexing collection: {str(e)}")
+def handle_api_error(func):
+    """Decorator for standardizing API error handling"""
+    async def wrapper(*args, **kwargs):
+        try:
+            return await func(*args, **kwargs)
+        except HTTPException:
+            raise
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            
+            endpoint = func.__name__
+            raise HTTPException(
+                status_code=500, 
+                detail=f"Error in {endpoint}: {str(e)}"
+            )
+    return wrapper
 
 if __name__ == "__main__":
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)

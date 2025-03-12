@@ -5,7 +5,7 @@ import concurrent.futures
 import re
 import PyPDF2
 from typing import List, Dict, Any
-
+import requests
 from ollamarag_core import OllamaRAG
 
 logger = logging.getLogger("ollamarag")
@@ -33,7 +33,7 @@ class OllamaDocumentProcessor(OllamaRAG):
             }
     
     def ingest_pdf(self, pdf_path: str, chunk_size: int = 1000, chunk_overlap: int = 500, 
-                   max_workers: int = 4) -> None:
+                max_workers: int = 4) -> None:
         """
         Ingest a PDF document, chunk it, and store in ChromaDB.
         
@@ -45,7 +45,6 @@ class OllamaDocumentProcessor(OllamaRAG):
         """
         self.current_pdf = os.path.basename(pdf_path)
         collection_name = os.path.splitext(self.current_pdf)[0].replace(" ", "_")
-
         
         logger.info(f"Ingesting PDF: {pdf_path}")
         start_time = time.time()
