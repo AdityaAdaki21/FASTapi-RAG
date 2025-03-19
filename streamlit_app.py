@@ -40,10 +40,41 @@ with st.sidebar:
             st.error("Please enter at least one URL")
 
 # Main chat interface
-# Display chat history
+# Custom CSS for better styling
+st.markdown("""
+<style>
+    .stChatMessage {
+        padding: 1rem;
+        border-radius: 0.5rem;
+        margin-bottom: 1rem;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    .stChatMessage.user {
+        background-color: #f0f2f6;
+    }
+    .stChatMessage.assistant {
+        background-color: #ffffff;
+    }
+    .source-link {
+        font-size: 0.8rem;
+        color: #666;
+        text-decoration: none;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+# Display chat history with enhanced formatting
 for message in st.session_state.chat_history:
     with st.chat_message(message["role"]):
-        st.write(message["content"])
+        if message["role"] == "assistant" and isinstance(message["content"], dict):
+            st.markdown(message["content"]["answer"])
+            if message["content"]["sources"]:
+                st.markdown("---")
+                st.markdown("**Sources:**")
+                for source in message["content"]["sources"]:
+                    st.markdown(f"- [{source['url']}]({source['url']})")
+        else:
+            st.markdown(message["content"])
 
 # Question input
 if question := st.chat_input("Ask a question about Formula 1"):
@@ -54,11 +85,18 @@ if question := st.chat_input("Ask a question about Formula 1"):
     with st.chat_message("user"):
         st.write(question)
     
-    # Generate and display response
+    # Generate and display response with enhanced formatting
     with st.chat_message("assistant"):
-        with st.spinner("Thinking..."):
+        with st.spinner("🤔 Analyzing Formula 1 knowledge..."):
             response = asyncio.run(st.session_state.f1_ai.ask_question(question))
-            st.write(response)
+            st.markdown(response["answer"])
+            
+            # Display sources if available
+            if response["sources"]:
+                st.markdown("---")
+                st.markdown("**Sources:**")
+                for source in response["sources"]:
+                    st.markdown(f"- [{source['url']}]({source['url']})")
             
     # Add assistant response to chat history
     st.session_state.chat_history.append({"role": "assistant", "content": response})

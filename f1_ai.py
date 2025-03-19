@@ -1,7 +1,16 @@
 import os
 import argparse
+import logging
+from datetime import datetime
 from dotenv import load_dotenv
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional, Tuple
+from rich.console import Console
+from rich.markdown import Markdown
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+console = Console()
 
 # Load environment variables
 load_dotenv()
@@ -17,7 +26,7 @@ class F1AI:
         
         # Initialize models with persistent instances
         self.embeddings = OllamaEmbeddings(model="mxbai-embed-large:latest")
-        self.llm = OllamaLLM(model="llama3.2")
+        self.llm = OllamaLLM(model="phi4-mini:3.8b")
         
         # Initialize vector store if it exists
         if os.path.exists(vector_db_path):
@@ -26,35 +35,68 @@ class F1AI:
             self.vectordb = None
             
     async def scrape(self, url: str, max_chunks: int = 100) -> List[Dict[str, Any]]:
-        """Scrape content from a URL and split into chunks."""
-        from playwright.async_api import async_playwright
+        """Scrape content from a URL and split into chunks with improved error handling."""
+        from playwright.async_api import async_playwright, TimeoutError
         from langchain.text_splitter import RecursiveCharacterTextSplitter
+        from bs4 import BeautifulSoup
         
-        async with async_playwright() as p:
-            browser = await p.chromium.launch()
-            page = await browser.new_page()
-            print(f"Loading {url}...")
-            await page.goto(url)
-            text = await page.inner_text("body")
-            await browser.close()
-        
-        print(f"Processing text ({len(text)} characters)...")
-        # Clean text
-        text = text.replace("\n", " ")
-        
-        # Split text into chunks
-        splitter = RecursiveCharacterTextSplitter(
-            chunk_size=512,
-            chunk_overlap=100,
-        )
-        
-        docs = splitter.create_documents([text])
-        
-        # Limit the number of chunks
-        limited_docs = docs[:max_chunks]
-        print(f"Using {len(limited_docs)} chunks out of {len(docs)} total chunks")
-        
-        return [{"page_content": doc.page_content, "metadata": {"source": url}} for doc in limited_docs]
+        try:
+            async with async_playwright() as p:
+                browser = await p.chromium.launch()
+                page = await browser.new_page()
+                console.log(f"[blue]Loading {url}...[/blue]")
+                
+                try:
+                    await page.goto(url, timeout=30000)
+                    # Get HTML content
+                    html_content = await page.content()
+                    soup = BeautifulSoup(html_content, 'html.parser')
+                    
+                    # Remove unwanted elements
+                    for element in soup.find_all(['script', 'style', 'nav', 'footer']):
+                        element.decompose()
+                    
+                    text = soup.get_text(separator=' ', strip=True)
+                except TimeoutError:
+                    logger.error(f"Timeout while loading {url}")
+                    return []
+                finally:
+                    await browser.close()
+            
+            console.log(f"[green]Processing text ({len(text)} characters)...[/green]")
+            
+            # Enhanced text cleaning
+            text = ' '.join(text.split())  # Normalize whitespace
+            
+            # Improved text splitting with semantic boundaries
+            splitter = RecursiveCharacterTextSplitter(
+                chunk_size=512,
+                chunk_overlap=50,
+                separators=["\n\n", "\n", ".", "!", "?", ",", " "],
+                length_function=len
+            )
+            
+            docs = splitter.create_documents([text])
+            
+            # Limit the number of chunks
+            limited_docs = docs[:max_chunks]
+            console.log(f"[yellow]Using {len(limited_docs)} chunks out of {len(docs)} total chunks[/yellow]")
+            
+            # Enhanced metadata
+            timestamp = datetime.now().isoformat()
+            return [{
+                "page_content": doc.page_content,
+                "metadata": {
+                    "source": url,
+                    "chunk_index": i,
+                    "total_chunks": len(limited_docs),
+                    "timestamp": timestamp
+                }
+            } for i, doc in enumerate(limited_docs)]
+            
+        except Exception as e:
+            logger.error(f"Error scraping {url}: {str(e)}")
+            return []
 
     async def ingest(self, urls: List[str], max_chunks_per_url: int = 100) -> None:
         """Ingest data from URLs into the vector database."""
@@ -88,29 +130,74 @@ class F1AI:
         self.vectordb.persist()
         print("✅ Vector database created and persisted successfully!")
     
-    async def ask_question(self, question: str) -> str:
-        """Ask a question and get a response using RAG."""
+    async def ask_question(self, question: str) -> Dict[str, Any]:
+        """Ask a question and get a response using RAG with enhanced formatting and citations."""
         if not self.vectordb:
-            return "Error: Vector database not initialized. Please ingest data first."
+            return {"answer": "Error: Vector database not initialized. Please ingest data first.", "sources": []}
         
         from langchain.chains import RetrievalQA
         from langchain_ollama import OllamaLLM
+        from langchain.prompts import PromptTemplate
         
-        # Retrieve relevant documents
-        retriever = self.vectordb.as_retriever(search_kwargs={"k": 5})
+        # Enhanced prompt template with source citation instructions
+        template = """
+        Answer the question based on the provided context. Include relevant citations.
+        If you're unsure, acknowledge the uncertainty.
         
-        # Create RAG chain using cached LLM
+        Context: {context}
+        Question: {question}
+        
+        Answer with citations:"""
+        
+        prompt = PromptTemplate(template=template, input_variables=["context", "question"])
+        
+        # Retrieve relevant documents with MMR reranking
+        retriever = self.vectordb.as_retriever(
+            search_type="mmr",
+            search_kwargs={
+                "k": 5,
+                "fetch_k": 8,  # Fetch more documents for reranking
+                "lambda_mult": 0.7  # Diversity factor
+            }
+        )
+        
+        # Create enhanced RAG chain
         qa_chain = RetrievalQA.from_chain_type(
             llm=self.llm,
             chain_type="stuff",
             retriever=retriever,
-            return_source_documents=True
+            return_source_documents=True,
+            chain_type_kwargs={
+                "prompt": prompt,
+                "verbose": True
+            }
         )
         
-        # Get response
-        response = await qa_chain.ainvoke({"query": question})
-        
-        return response["result"]
+        try:
+            # Get response
+            response = await qa_chain.ainvoke({"query": question})
+            
+            # Format sources
+            sources = [{
+                "url": doc.metadata["source"],
+                "chunk_index": doc.metadata.get("chunk_index", 0),
+                "timestamp": doc.metadata.get("timestamp", "")
+            } for doc in response["source_documents"]]
+            
+            # Format response with markdown
+            formatted_response = {
+                "answer": response["result"],
+                "sources": sources
+            }
+            
+            return formatted_response
+            
+        except Exception as e:
+            logger.error(f"Error processing question: {str(e)}")
+            return {
+                "answer": "I apologize, but I encountered an error while processing your question. Please try again.",
+                "sources": []
+            }
 
 async def main():
     """Main function to run the application."""
