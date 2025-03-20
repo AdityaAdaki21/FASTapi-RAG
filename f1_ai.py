@@ -21,21 +21,19 @@ console = Console()
 load_dotenv()
 
 class F1AI:
-    def __init__(self, index_name: str = "f12", llm_provider: str = "huggingface"):
+    def __init__(self, index_name: str = "f12", llm_provider: str = "openrouter"):
         """
         Initialize the F1-AI RAG application.
         
         Args:
             index_name (str): Name of the Pinecone index to use
-            llm_provider (str): Provider for LLM and embeddings. 
-                                Options: "ollama", "huggingface", "huggingface-openai"
+            llm_provider (str): Provider for LLM. "openrouter" is used by default.
         """
         self.index_name = index_name
         
-        # Initialize LLM and embeddings via manager
+        # Initialize LLM via manager
         self.llm_manager = LLMManager(provider=llm_provider)
         self.llm = self.llm_manager.get_llm()
-        self.embeddings = self.llm_manager.get_embeddings()
         
         # Load Pinecone API Key
         pinecone_api_key = os.getenv("PINECONE_API_KEY")
@@ -49,20 +47,17 @@ class F1AI:
         existing_indexes = [idx['name'] for idx in self.pc.list_indexes()]
 
         if index_name not in existing_indexes:
-            console.log(f"🚀 Creating Pinecone index: {index_name}")
-            # Update the dimension to match your embedding model
-            self.pc.create_index(
-                name=index_name,
-                dimension=384,  # Match embedding dimensions of the model
-                metric="cosine"
-            )
+            raise ValueError(f"❌ Pinecone index '{index_name}' does not exist! Please create it first.")
 
         # Connect to Pinecone index
         index = self.pc.Index(index_name)
-        self.vectordb = LangchainPinecone.from_existing_index(
-            index_name=index_name,
+        
+        # Use the existing pre-configured Pinecone index
+        # Note: We're using the embeddings that Pinecone already has configured
+        self.vectordb = LangchainPinecone(
+            index=index,
             text_key="text",
-            embedding=self.embeddings
+            embedding=self.llm_manager.get_embeddings()  # This will only be used for new queries
         )
 
         print(f"✅ Successfully connected to Pinecone index: {index_name}")
@@ -134,7 +129,6 @@ class F1AI:
 
     async def ingest(self, urls: List[str], max_chunks_per_url: int = 100) -> None:
         """Ingest data from URLs into the vector database."""
-        from langchain_community.vectorstores import Pinecone as LangchainPinecone
         from tqdm import tqdm
         
         # Create empty list to store documents
@@ -152,12 +146,10 @@ class F1AI:
         metadatas = [doc["metadata"] for doc in all_docs]
         
         print("Starting embedding generation and uploading to Pinecone (this might take several minutes)...")
-        self.vectordb = LangchainPinecone.from_texts(
+        # Use the existing vectordb to add documents
+        self.vectordb.add_texts(
             texts=texts,
-            embedding=self.embeddings,
-            index_name=self.index_name,
-            metadatas=metadatas,
-            text_key="text"
+            metadatas=metadatas
         )
         
         print("✅ Documents successfully uploaded to Pinecone!")
@@ -249,9 +241,9 @@ async def main():
     ask_parser = subparsers.add_parser("ask", help="Ask a question")
     ask_parser.add_argument("question", help="Question to ask")
     
-    # Added provider argument with the new option
-    parser.add_argument("--provider", choices=["ollama", "huggingface", "huggingface-openai"], default="huggingface",
-                        help="Provider for LLM and embeddings (default: huggingface)")
+    # Provider argument
+    parser.add_argument("--provider", choices=["ollama", "openrouter"], default="openrouter",
+                        help="Provider for LLM (default: openrouter)")
     
     args = parser.parse_args()
     
