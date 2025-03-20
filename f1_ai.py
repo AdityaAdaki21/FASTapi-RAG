@@ -50,10 +50,10 @@ class F1AI:
 
         if index_name not in existing_indexes:
             console.log(f"🚀 Creating Pinecone index: {index_name}")
-            # Update the dimension to match your embedding model (1024)
+            # Update the dimension to match your embedding model
             self.pc.create_index(
                 name=index_name,
-                dimension=384,  # Changed from 4096 to 1024 to match embedding dimensions
+                dimension=384,  # Match embedding dimensions of the model
                 metric="cosine"
             )
 
@@ -177,15 +177,22 @@ class F1AI:
             # Get relevant documents
             docs = retriever.get_relevant_documents(question)
             
+            if not docs:
+                return {
+                    "answer": "I couldn't find any relevant information in my knowledge base. Please try a different question or ingest more relevant data.",
+                    "sources": []
+                }
+            
             # Format context from documents
-            context = "\n\n".join([doc.page_content for doc in docs])
+            context = "\n\n".join([f"Document {i+1}: {doc.page_content}" for i, doc in enumerate(docs)])
             
             # Create prompt for the LLM
             prompt = f"""
-            Answer the question based on the provided context. Include relevant citations.
-            If you're unsure, acknowledge the uncertainty.
+            Answer the question based on the provided context. Include relevant citations using [1], [2], etc.
+            If you're unsure or if the context doesn't contain the information, acknowledge the uncertainty.
 
-            Context: {context}
+            Context:
+            {context}
             
             Question: {question}
 
@@ -193,8 +200,14 @@ class F1AI:
             """
             
             # Get response from LLM
+            response_text = ""
             if hasattr(self.llm, "__call__"):  # Direct inference client wrapped function
                 response_text = self.llm(prompt)
+                # Debug response
+                logger.info(f"Raw LLM response type: {type(response_text)}")
+                if not response_text or response_text.strip() == "":
+                    logger.error("Empty response from LLM")
+                    response_text = "I apologize, but I couldn't generate a response. This might be due to an issue with the language model."
             else:  # LangChain LLM
                 response_text = self.llm.invoke(prompt)
             
@@ -237,7 +250,7 @@ async def main():
     ask_parser.add_argument("question", help="Question to ask")
     
     # Added provider argument with the new option
-    parser.add_argument("--provider", choices=["ollama", "huggingface", "huggingface-openai"], default="huggingface-openai",
+    parser.add_argument("--provider", choices=["ollama", "huggingface", "huggingface-openai"], default="huggingface",
                         help="Provider for LLM and embeddings (default: huggingface)")
     
     args = parser.parse_args()
@@ -248,8 +261,11 @@ async def main():
         await f1_ai.ingest(args.urls, max_chunks_per_url=args.max_chunks)
     elif args.command == "ask":
         response = await f1_ai.ask_question(args.question)
-        console.print(f"Answer: {response['answer']}")
-        console.print("\nSources:")
+        console.print("\n[bold green]Answer:[/bold green]")
+        # Format as markdown to make it prettier
+        console.print(Markdown(response['answer']))
+        
+        console.print("\n[bold yellow]Sources:[/bold yellow]")
         for i, source in enumerate(response['sources']):
             console.print(f"[{i+1}] {source['url']}")
     else:

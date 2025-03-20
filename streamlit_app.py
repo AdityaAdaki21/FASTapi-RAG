@@ -14,32 +14,6 @@ st.set_page_config(page_title="F1-AI: Formula 1 RAG Application", layout="wide")
 # Title and description
 st.title("F1-AI: Formula 1 RAG Application")
 
-# Sidebar for data ingestion
-with st.sidebar:
-    st.header("Data Ingestion")
-    urls_input = st.text_area(
-        "Enter URLs (one per line)",
-        help="Enter Formula 1 related URLs to scrape data from"
-    )
-    max_chunks = st.number_input(
-        "Max chunks per URL",
-        min_value=10,
-        max_value=500,
-        value=100,
-        step=10,
-        help="Maximum number of text chunks to process per URL"
-    )
-    
-    if st.button("Ingest Data"):
-        if urls_input.strip():
-            urls = [url.strip() for url in urls_input.split('\n') if url.strip()]
-            with st.spinner("Ingesting data... This may take a few minutes."):
-                asyncio.run(st.session_state.f1_ai.ingest(urls, max_chunks_per_url=max_chunks))
-            st.success("✅ Data ingestion completed!")
-        else:
-            st.error("Please enter at least one URL")
-
-# Main chat interface
 # Custom CSS for better styling
 st.markdown("""
 <style>

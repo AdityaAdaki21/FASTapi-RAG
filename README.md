@@ -7,7 +7,8 @@ F1-AI is a Retrieval-Augmented Generation (RAG) application specifically designe
 ![Example](image.png)
 
 - Web scraping of Formula 1 content with automatic content extraction
-- Vector database storage using Chroma for efficient similarity search
+- Vector database storage using Pinecone for efficient similarity search
+- Multiple LLM provider options (HuggingFace, Ollama)
 - RAG-powered question answering with contextual understanding
 - Command-line interface for automation and scripting
 - User-friendly Streamlit web interface
@@ -18,17 +19,22 @@ F1-AI is a Retrieval-Augmented Generation (RAG) application specifically designe
 F1-AI is built on a modern tech stack:
 
 - **LangChain**: Orchestrates the RAG pipeline and manages interactions between components
-- **Chroma**: Vector database for storing and retrieving embeddings
-- **Ollama**: Local LLM integration for text generation and embeddings
+- **Pinecone**: Vector database for storing and retrieving embeddings
+- **HuggingFace**: Primary LLM provider with Mixtral-8x7B-Instruct model
+- **Ollama**: Alternative local LLM provider for text generation and embeddings
 - **Playwright**: Handles web scraping with JavaScript support
 - **Streamlit**: Provides the web interface
 
 ## Prerequisites
 
 - Python 3.8 or higher
-- Ollama installed and running locally
+- HuggingFace API key (set as HUGGINGFACE_API_KEY environment variable)
+- Pinecone API key (set as PINECONE_API_KEY environment variable)
 - 8GB RAM minimum (16GB recommended)
 - Internet connection for web scraping
+- Ollama installed (optional, for local LLM support)
+  - Download from [Ollama's website](https://ollama.ai)
+  - Pull the required model: `ollama pull mixtral`
 
 ## Installation
 
@@ -48,10 +54,12 @@ F1-AI is built on a modern tech stack:
    playwright install
    ```
 
-4. Make sure Ollama is running and install required models:
-   ```bash
-   ollama pull mxbai-embed-large
-   ollama pull llama3.2
+4. Set up environment variables:
+   Create a .env file with:
+   ```
+   HUGGINGFACE_API_KEY=your_api_key_here  # Required for HuggingFace provider
+   PINECONE_API_KEY=your_api_key_here      # Required for vector storage
+   OLLAMA_HOST=http://localhost:11434 
    ```
 
 ## Usage
@@ -60,20 +68,19 @@ F1-AI is built on a modern tech stack:
 
 1. Ingest data from URLs:
    ```bash
-   python f1_ai.py ingest --urls <url1> <url2> --max-chunks 100
+   python f1_ai.py ingest --urls <url1> <url2> --max-chunks 100 --provider huggingface
    ```
    Options:
    - `--urls`: Space-separated list of URLs to scrape
    - `--max-chunks`: Maximum number of text chunks to process (default: 100)
-   - `--chunk-size`: Size of text chunks (default: 500)
+   - `--provider`: LLM provider to use (huggingface, ollama, huggingface-openai)
 
 2. Ask questions about Formula 1:
    ```bash
-   python f1_ai.py ask "Who won the 2023 F1 World Championship?"
+   python f1_ai.py ask "Who won the 2023 F1 World Championship?" --provider huggingface
    ```
    Options:
-   - `--verbose`: Show detailed processing information
-   - `--model`: Specify a different Ollama model
+   - `--provider`: Choose LLM provider (huggingface, ollama, huggingface-openai)
 
 ### Streamlit Interface
 
@@ -95,42 +102,13 @@ This will open a web interface where you can:
   - Handles data ingestion, chunking, and embeddings
   - Manages vector database operations
   - Implements question-answering logic
+- `llm_manager.py`: LLM provider management
+  - Supports multiple LLM providers (HuggingFace, Ollama)
+  - Handles embeddings generation
+  - Manages API interactions
 - `streamlit_app.py`: Streamlit web interface
   - Provides user-friendly UI
   - Manages async operations
-  - Handles session state
-- `requirements.txt`: Project dependencies
-- `vectordb/`: Directory containing the Chroma vector database
-
-## Troubleshooting
-
-### Common Issues
-
-1. **Ollama Connection Error**
-   - Ensure Ollama is running (`ollama serve`)
-   - Check if models are properly installed
-   - Verify network connectivity
-
-2. **Web Scraping Failures**
-   - Check URL accessibility
-   - Ensure JavaScript is enabled
-   - Try increasing timeout values
-
-3. **Memory Issues**
-   - Reduce chunk size
-   - Limit concurrent operations
-   - Clear vector database cache
-
-## API Documentation
-
-### F1AI Class
-
-```python
-class F1AI:
-    async def ingest_urls(urls: List[str], max_chunks: int = 100) -> None
-    async def ask_question(question: str, verbose: bool = False) -> str
-    async def clear_database() -> None
-```
 
 ## Contributing
 

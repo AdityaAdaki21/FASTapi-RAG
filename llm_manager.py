@@ -4,6 +4,11 @@ from huggingface_hub import InferenceClient
 from langchain_ollama import OllamaEmbeddings, OllamaLLM
 from dotenv import load_dotenv
 import numpy as np
+import logging
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # Load environment variables
 load_dotenv()
@@ -45,7 +50,7 @@ class LLMManager:
         if not api_key:
             raise ValueError("HuggingFace API key not found. Set HUGGINGFACE_API_KEY in environment variables.")
         
-        llm_endpoint = "microsoft/Phi-3-mini-4k-instruct"
+        llm_endpoint = "mistralai/Mixtral-8x7B-Instruct-v0.1"
         embedding_endpoint = "sentence-transformers/all-MiniLM-L6-v2"
         
         # Initialize InferenceClient for LLM
@@ -54,7 +59,7 @@ class LLMManager:
             token=api_key
         )
         
-        # Initialize InferenceClient for embeddings - removed trust_remote_code parameter
+        # Initialize InferenceClient for embeddings
         self.embedding_client = InferenceClient(
             model=embedding_endpoint,
             token=api_key
@@ -63,9 +68,12 @@ class LLMManager:
         # Store generation parameters
         self.generation_kwargs = {
             "temperature": 0.7,
-            "max_new_tokens": 1024,
-            "repetition_penalty": 1.2,
-            "do_sample": True
+            "max_new_tokens": 512,  # Reduced to avoid potential token limit issues
+            "repetition_penalty": 1.1,
+            "do_sample": True,
+            "top_k": 50,
+            "top_p": 0.9,
+            "return_full_text": False  # Only return the generated text, not the prompt
         }
     
     # LLM methods for compatibility with LangChain
@@ -80,21 +88,47 @@ class LLMManager:
             # Return a function that wraps the InferenceClient for LLM
             def llm_function(prompt, **kwargs):
                 params = {**self.generation_kwargs, **kwargs}
-                response = self.llm_client.text_generation(
-                    prompt,
-                    **params
-                )
-                return response
+                try:
+                    logger.info(f"Sending prompt to HuggingFace (length: {len(prompt)})")
+                    response = self.llm_client.text_generation(
+                        prompt,
+                        details=True,  # Get detailed response
+                        **params
+                    )
+                    # Extract generated text from response
+                    if isinstance(response, dict) and 'generated_text' in response:
+                        response = response['generated_text']
+                    logger.info(f"Received response from HuggingFace (length: {len(response) if response else 0})")
+                    
+                    # Ensure we get a valid string response
+                    if not response or not isinstance(response, str) or response.strip() == "":
+                        logger.warning("Empty or invalid response from HuggingFace, using fallback")
+                        return "I couldn't generate a proper response based on the available information."
+                    
+                    return response
+                except Exception as e:
+                    logger.error(f"Error during LLM inference: {str(e)}")
+                    return f"Error generating response: {str(e)}"
             
             # Add async capability
             async def allm_function(prompt, **kwargs):
                 params = {**self.generation_kwargs, **kwargs}
-                response = await self.llm_client.text_generation(
-                    prompt,
-                    **params,
-                    stream=False
-                )
-                return response
+                try:
+                    response = await self.llm_client.text_generation(
+                        prompt,
+                        **params,
+                        stream=False
+                    )
+                    
+                    # Ensure we get a valid string response
+                    if not response or not isinstance(response, str) or response.strip() == "":
+                        logger.warning("Empty or invalid response from HuggingFace async, using fallback")
+                        return "I couldn't generate a proper response based on the available information."
+                    
+                    return response
+                except Exception as e:
+                    logger.error(f"Error during async LLM inference: {str(e)}")
+                    return f"Error generating response: {str(e)}"
             
             llm_function.ainvoke = allm_function
             return llm_function
@@ -121,21 +155,32 @@ class LLMManager:
                     
                     for i in range(0, len(texts), batch_size):
                         batch = texts[i:i+batch_size]
-                        batch_embeddings = self.client.feature_extraction(batch)
-                        # Convert to standard Python list format
-                        batch_results = [list(map(float, embedding)) for embedding in batch_embeddings]
-                        embeddings.extend(batch_results)
+                        try:
+                            batch_embeddings = self.client.feature_extraction(batch)
+                            # Convert to standard Python list format
+                            batch_results = [list(map(float, embedding)) for embedding in batch_embeddings]
+                            embeddings.extend(batch_results)
+                        except Exception as e:
+                            logger.error(f"Error embedding batch {i}: {str(e)}")
+                            # Return zero vectors as fallback
+                            for _ in range(len(batch)):
+                                embeddings.append([0.0] * 384)  # Use correct dimension
                     
                     return embeddings
                 
                 def embed_query(self, text: str) -> List[float]:
                     """Embed a single query."""
-                    embedding = self.client.feature_extraction(text)
-                    if isinstance(embedding, list) and len(embedding) > 0:
-                        # If it returns a batch (list of embeddings) for a single input
-                        return list(map(float, embedding[0]))
-                    # If it returns a single embedding
-                    return list(map(float, embedding))
+                    try:
+                        embedding = self.client.feature_extraction(text)
+                        if isinstance(embedding, list) and len(embedding) > 0:
+                            # If it returns a batch (list of embeddings) for a single input
+                            return list(map(float, embedding[0]))
+                        # If it returns a single embedding
+                        return list(map(float, embedding))
+                    except Exception as e:
+                        logger.error(f"Error embedding query: {str(e)}")
+                        # Return zero vector as fallback
+                        return [0.0] * 384  # Use correct dimension
                 
                 # Make the class callable to fix the TypeError
                 def __call__(self, texts):
