@@ -141,15 +141,3 @@ Contributions are welcome! Please follow these steps:
 3. Commit your changes
 4. Push to the branch
 5. Submit a Pull Request
-
-Please ensure your code follows our style guidelines and includes appropriate tests.
-
-## License
-
-This project is licensed under the MIT License - see the LICENSE file for details.
-
-## Acknowledgments
-
-- LangChain team for the excellent RAG framework
-- Ollama project for local LLM support
-- Formula 1 community for the wealth of information
